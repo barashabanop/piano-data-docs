@@ -1,0 +1,273 @@
+h1. Piano Conversion Export Data Is Structurally Aggregated and Cannot Support Accurate Reporting
+
+h2. Type: Data Quality / Architecture
+
+h2. Priority: High
+
+----
+
+h2. Summary
+
+The Piano VX conversion export endpoint ({{/rest/export/schedule/vx/conversion}}) returns data that is *structurally aggregated*: grouped by single dimensions (device, location, page, etc.) with no event IDs, no date column, no user identity, and no cross-dimension join keys. The export format makes it impossible to do user-level analysis, cross-dimension reporting, or reliable backfills.
+
+Piano also provides an event-level API ({{/api/v3/publisher/conversion/list}}) that returns individual conversion records with unique IDs, timestamps, user identity, and payment details. This endpoint is not currently used by our pipeline.
+
+This ticket documents the problem with evidence, compares the available approaches, and recommends a hybrid solution that uses the event-level API for conversion data while keeping the export for Exposures (the only source for paywall impression counts).
+
+*Attached evidence (fetched April 3, 2026 from production, Cosmopolitan, date March 15, 2026):*
+
+||File||What it is||Size||
+|{{export-csvs-march-15-2026.zip}}|All 9 CSVs from the VX conversion export (aggregated)|18 KB|
+|{{list-api-conversions-march-15-2026.json}}|Raw JSON from {{/conversion/list}} (38 individual events)|86 KB|
+|{{list-api-conversions-march-15-2026.csv}}|Flattened CSV of the same 38 events|9 KB|
+
+----
+
+h2. What the Export Data Looks Like
+
+We fetched production data for March 15, 2026 (Cosmopolitan) from the VX conversion export endpoint. It returned 9 CSV files. See {{export-csvs-march-15-2026.zip}} attached.
+
+h3. The export produces 9 CSV files, each grouped by a single dimension
+
+Here is what the device CSV looks like:
+
+{noformat}
+Device,Operating System,Browser,Exposures,Conversions,Conversion rate,Currency
+mobile,android,chrome,12314,17,0.00138054,
+mobile,ios,misc,2233,9,0.00403045,
+mobile,ios,safari,5632,2,0.00035511,
+other,other,misc,74,7,0.09459459,
+desktop,other,chrome,53,1,0.01886792,
+mobile,ios,chrome,969,1,0.00103199,
+mobile,android,misc,2141,1,0.00046707,
+...21 more rows with 0 conversions...
+{noformat}
+
+And the location CSV:
+
+{noformat}
+Country,Location,Exposures,Conversions,Conversion rate,Currency
+N/A,N/A,3,7,2.333333,
+The Netherlands,North Holland,3736,5,0.001338,
+The Netherlands,South Holland,4425,4,0.000904,
+Belgium,Flanders,3876,3,0.000774,
+...225 more rows...
+{noformat}
+
+Each CSV has the same total: *38 conversions*. But there is:
+* No date or timestamp column
+* No event ID ({{term_conversion_id}})
+* No user identity (uid, email)
+* No payment amount
+* No way to join device rows to location rows -- they share no key
+
+h3. What the event-level API returns for the same date
+
+Piano's {{/api/v3/publisher/conversion/list}} endpoint returns individual conversion records. We fetched the same date (March 15, 2026) and received 38 individual events -- one per conversion. See {{list-api-conversions-march-15-2026.json}} attached. Here is one event (abbreviated):
+
+{code:json}
+{
+  "term_conversion_id": "TC0HTQMCP6LD",
+  "type": "Registration",
+  "aid": "JC6giZ1Ape",
+  "create_date": 1773616906,
+  "browser_id": "mmj4ybp39ycq5r8u",
+  "term": {
+    "term_id": "TMS2OE33RI3N",
+    "name": "Maak een account aan",
+    "type": "registration"
+  },
+  "user_access": {
+    "access_id": "RFlI119N4azY",
+    "granted": true,
+    "start_date": 1773616905,
+    "user": {
+      "uid": "3c9b8af1-a1ee-433e-8272-bd1f1625e713",
+      "email": "kellywarie142@gmail.com",
+      "create_date": 1773616902
+    }
+  }
+}
+{code}
+
+Every record has:
+* A unique {{term_conversion_id}} (deduplatable)
+* A {{create_date}} Unix timestamp (actual conversion time: March 15, 2026 23:21:46 UTC)
+* User identity (uid, email)
+* Term, access, subscription, and payment details all on the same record
+
+h3. What the export cannot answer that the event-level API can
+
+||Question||Export (current)||Event-level API ({{/conversion/list}})||
+|How many total conversions?|38 (correct)|38 (correct)|
+|Which users converted?|No user column in any CSV|Each record has uid and email|
+|What device did user X use?|Device CSV has no user column|Enrichable via {{/conversion/data/get}} per event|
+|How many Android users from Netherlands?|Device and location CSVs cannot be joined|All dimensions on same row after enrichment|
+|When exactly did each conversion happen?|No date column|{{create_date}} = Unix timestamp per event|
+|Can you deduplicate on reload?|No unique row identifier|{{term_conversion_id}} is unique per event|
+|Can you backfill a date range?|Only day-by-day (see below)|{{create_date}} allows partitioning by day|
+|Revenue per page?|No payment data in CSVs|Payment amount available per event|
+
+----
+
+h2. The Three Problems With Aggregated Exports
+
+h3. 1. Cross-dimension analysis is impossible
+
+Each export CSV is a standalone summary grouped by one dimension. There is no event ID, user ID, or foreign key shared between files. You cannot join {{conversion-device.csv}} to {{conversion-location.csv}}.
+
+This means: revenue by page, conversions by device by country, promo code effectiveness by page -- all impossible from exports alone. The Piano dashboard can do this because it queries the underlying events.
+
+h3. 2. Backfills must be day-by-day for exports
+
+The export CSVs contain *no date column*. The only date information exists in the filename (derived from the {{from}}/{{to}} API parameters). This means:
+
+* If you request {{from=2026-03-01&to=2026-03-15}}, Piano returns one set of CSVs with numbers summed over 15 days. There is no row-level indicator of which day each conversion belongs to. The result cannot be partitioned into daily slices.
+* To get accurate daily data, the pipeline must call the export endpoint once per day: {{from=2026-03-15&to=2026-03-15}}, then {{from=2026-03-16&to=2026-03-16}}, etc.
+
+*The event-level API does not have this problem.* Each record carries a {{create_date}} Unix timestamp representing the actual moment the conversion occurred. A backfill can request any date range and partition results by the event's own date. For example, the 38 records fetched for March 15 all had timestamps falling between {{2026-03-15 00:49:08 UTC}} and {{2026-03-15 23:21:46 UTC}}.
+
+h3. 3. No deduplication is possible with exports
+
+Export rows have no unique identifier. If the same day is loaded twice (retry, overlap, reprocessing), there is no {{term_conversion_id}} to detect duplicates. The list API returns a unique ID on every record, making deduplication trivial.
+
+----
+
+h2. Additional Export Issues
+
+h3. Duplicate dimension rows within a single export
+
+The Quest device export (6-year range) contains the same device/OS/browser appearing twice:
+
+{noformat}
+mobile,android,chrome,1761595,563,0.00031960,EUR   ← with currency
+mobile,android,chrome,9085,0,0.00000000,            ← without currency
+{noformat}
+
+Piano appears to split paid vs non-paid conversions into separate rows, but provides no column to distinguish them. Loading both inflates exposure counts.
+
+----
+
+h2. Impact on Current Data
+
+||What is affected||How||
+|Bronze tables {{piano_reports_*}} (9 tables)|Daily data appears correct, but overlapping date ranges or multi-day fetches produce undeduplatable rows|
+|Dashboards showing "conversions by X over time"|Misleading if underlying data has overlapping aggregation windows|
+|Revenue by page/device/location|Impossible -- export CSVs have no payment data|
+|User-level analysis|Impossible -- export CSVs have no user identity|
+|Historical backfills|Must be day-by-day; multi-day ranges produce undividable aggregates|
+
+----
+
+h2. Approach Comparison
+
+h3. Option A: Export-Only (current state)
+
+Use only the VX conversion export.
+
+||Aspect||Assessment||
+|Conversion totals|Correct|
+|Cross-dimension analysis|Not possible|
+|User-level analysis|Not possible|
+|Revenue per page/device/location|Not possible|
+|Deduplication|Not possible (no event IDs)|
+|Backfills|Day-by-day only|
+|Exposures (paywall impressions)|Available -- only source for this|
+|Complexity|Low|
+
+*Verdict:* Suitable only if requirements are limited to single-dimension aggregate counts and Exposures. Cannot support any question that combines dimensions or identifies users.
+
+h3. Option B: API-Only
+
+Drop exports entirely. Use {{/conversion/list}} for event-level data, enriched with {{/conversion/data/get}} for behavioral context (device, page, location, tags).
+
+||Aspect||Assessment||
+|Conversion totals|Correct|
+|Cross-dimension analysis|Full support -- all dimensions on same row|
+|User-level analysis|Full support -- uid, email, access details|
+|Revenue per page/device/location|Full support -- payment data + dimensions on same row|
+|Deduplication|Trivial -- {{term_conversion_id}} is unique|
+|Backfills|Any range -- {{create_date}} enables partitioning by day|
+|Exposures (paywall impressions)|*Lost permanently* -- no API alternative|
+|Conversion rate|*Lost permanently* -- derived from Exposures|
+|Complexity|Higher -- pagination + N enrichment calls + rate limits|
+
+*Verdict:* Best data quality and analytical flexibility. Choose this if Exposures and conversion rates are not needed.
+
+h3. Option C: Hybrid (recommended)
+
+Use {{/conversion/list}} + {{/conversion/data/get}} as the *primary source for conversion events*. Keep VX exports running *solely for Exposures*.
+
+||Aspect||Assessment||
+|Conversion totals|Correct -- from list API (event-level, deduplatable)|
+|Cross-dimension analysis|Full support|
+|User-level analysis|Full support|
+|Revenue per page/device/location|Full support|
+|Deduplication|Trivial via {{term_conversion_id}}|
+|Backfills (conversions)|Any range via list API -- {{create_date}} gives actual event time|
+|Backfills (exposures)|Day-by-day via export -- no date column in CSVs|
+|Exposures (paywall impressions)|Preserved from VX export|
+|Conversion rate|Calculable -- join list API counts with export Exposures|
+|Complexity|Two parallel pipelines|
+
+*How the hybrid works in practice:*
+
+# *Daily conversion ingestion (list API):* Call {{/conversion/list}} with {{date_from=yesterday&date_to=today}}. For each conversion, call {{/conversion/data/get}} to get page, device, location, tags. Merge into one row per conversion with all dimensions. Load into {{bronze.piano_conversion_events}}.
+# *Daily exposure ingestion (export):* Create VX export with {{from=yesterday&to=yesterday}} (always single day). Download and extract CSVs. Load into {{bronze.piano_conversion_exposures_*}}. These tables are used only for Exposures counts and conversion rate calculations.
+# *Backfill conversions:* Call {{/conversion/list}} with the desired date range. Each record has {{create_date}} -- partition by day at load time. No day-by-day looping required.
+# *Backfill exposures:* Must loop day-by-day. The export CSVs have no date column, so a multi-day range produces one aggregate lump that cannot be divided. Call the VX export once per day in the backfill range.
+
+*Verdict:* Best of both worlds. Event-level data for all analytical questions, Exposures from the only source that provides them. Backfills are accurate for both paths.
+
+----
+
+h2. What We Gain and What We Lose
+
+h3. Gained (not available today)
+
+||Capability||Source||
+|Individual conversion events with unique IDs|{{/conversion/list}}|
+|User identity per conversion (uid, email)|{{/conversion/list}}|
+|Payment amount and currency per conversion|{{/conversion/list}}|
+|All dimensions on same row (device + page + location + user)|{{/conversion/list}} + {{/conversion/data/get}}|
+|Geo coordinates (lat/lon/zip) per conversion|{{/conversion/data/get}}|
+|Content metadata (author, section) per conversion|{{/conversion/data/get}}|
+|Hour-of-day per conversion|{{create_date}} timestamp|
+|Accurate backfills (any range, partition by {{create_date}})|{{/conversion/list}}|
+|Deduplication via {{term_conversion_id}}|{{/conversion/list}}|
+|Correct event date per record|{{create_date}} from API|
+
+h3. Still requires exports (no API alternative)
+
+||Field||Why||
+|Exposures (paywall impression counts)|Tracked by Piano's frontend JavaScript, not stored in any API|
+|Conversion rate (Conversions / Exposures)|Derived from Exposures|
+
+h3. Lost with hybrid (acceptable)
+
+||Field||Workaround||
+|Template / Offer display names|API returns IDs only; build a lookup dimension table from VX subscription log export or manual mapping|
+
+----
+
+h2. Attachments
+
+h3. Evidence files
+
+All data fetched from production on April 3, 2026 for Cosmopolitan, date March 15, 2026.
+
+||File||Description||
+|*{{export-csvs-march-15-2026.zip}}*|9 CSV files from the VX conversion export. Each CSV is grouped by one dimension (device, location, page, etc.) with columns: dimension values, Exposures, Conversions, Conversion rate, Currency. No date column, no event ID, no user identity.|
+|*{{list-api-conversions-march-15-2026.json}}*|Raw JSON from {{/api/v3/publisher/conversion/list}} for the same date. 38 individual conversion events, each with a unique {{term_conversion_id}}, {{create_date}} timestamp, user identity, term details, and access details.|
+|*{{list-api-conversions-march-15-2026.csv}}*|Flattened version of the JSON -- 38 rows, 35 columns, one row per conversion event.|
+
+h3. Supporting documentation
+
+Supporting documentation:
+
+* {{MIGRATION_IMPACT.md}} — Table changes, before/after analysis, pipeline changes, rollback plan
+* {{DATA_SOURCES.md}} — Complete field inventory of every Piano data source
+* {{ENRICHMENT_STRATEGY.md}} — How the hybrid enrichment pipeline works
+* {{TABLE_SCHEMAS.md}} — Proposed bronze/gold table schemas
+* {{FIELD_MAPPING.md}} — Field-by-field mapping from CSV to API to BigQuery
+

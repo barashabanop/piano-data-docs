@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Piano Data — Technical Overview Canvas</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --surface2: #334155;
+    --accent: #3b82f6;
+    --accent2: #8b5cf6;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --border: #475569;
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1200px; margin: 0 auto; }
+  .full { grid-column: 1 / -1; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .panel-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 12px; }
+  h1 { font-size: 1.5rem; color: var(--text); margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 20px; }
+  h3 { font-size: 0.95rem; margin-bottom: 8px; }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+  .tag-red { background: rgba(239,68,68,0.15); color: var(--red); }
+  .tag-green { background: rgba(34,197,94,0.15); color: var(--green); }
+  .tag-yellow { background: rgba(234,179,8,0.15); color: var(--yellow); }
+  .tag-blue { background: rgba(59,130,246,0.15); color: var(--accent); }
+
+  .flow-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+  .flow-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 14px; font-size: 0.8rem; text-align: center; min-width: 100px; }
+  .flow-box.highlight { border-color: var(--accent); background: rgba(59,130,246,0.1); }
+  .flow-box.danger { border-color: var(--red); background: rgba(239,68,68,0.1); }
+  .flow-box.new { border-color: var(--green); background: rgba(34,197,94,0.1); }
+  .arrow { color: var(--muted); font-size: 1.2rem; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 8px; }
+  th { text-align: left; padding: 6px 10px; color: var(--muted); border-bottom: 1px solid var(--border); font-size: 0.7rem; text-transform: uppercase; }
+  td { padding: 6px 10px; border-bottom: 1px solid rgba(71,85,105,0.4); }
+  tr:hover td { background: rgba(59,130,246,0.05); }
+
+  .metric { text-align: center; padding: 12px; }
+  .metric-num { font-size: 2rem; font-weight: 700; }
+  .metric-label { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+
+  .tabs { display: flex; gap: 2px; margin-bottom: 16px; }
+  .tab { padding: 6px 16px; border-radius: 6px 6px 0 0; font-size: 0.8rem; cursor: pointer; background: var(--surface2); color: var(--muted); border: 1px solid var(--border); border-bottom: none; transition: all 0.2s; }
+  .tab.active { background: var(--surface); color: var(--text); border-color: var(--accent); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .col-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .col-chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: 0.7rem; font-family: monospace; }
+  .col-chip.meta { border-color: var(--accent); color: var(--accent); }
+  .col-chip.missing { border-color: var(--red); color: var(--red); text-decoration: line-through; }
+  .col-chip.added { border-color: var(--green); color: var(--green); }
+
+  .checklist { list-style: none; padding: 0; }
+  .checklist li { padding: 6px 0; font-size: 0.85rem; border-bottom: 1px solid rgba(71,85,105,0.3); display: flex; align-items: center; gap: 8px; }
+  .checklist li:last-child { border-bottom: none; }
+  .check { width: 18px; height: 18px; border-radius: 4px; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 0.7rem; flex-shrink: 0; }
+  .check.done { border-color: var(--green); color: var(--green); background: rgba(34,197,94,0.1); }
+</style>
+</head>
+<body>
+
+<div style="max-width: 1200px; margin: 0 auto 20px;">
+  <h1>Piano Data — Technical Overview</h1>
+  <p class="sub">Interactive reference for the data quality ticket. Cosmopolitan / March 15, 2026.</p>
+</div>
+
+<div class="grid">
+
+  <!-- Current pipeline -->
+  <div class="panel full">
+    <div class="panel-title">Current Pipeline</div>
+    <div class="flow-h">
+      <div class="flow-box">Piano Export API</div>
+      <span class="arrow">→</span>
+      <div class="flow-box">9 CSV files</div>
+      <span class="arrow">→</span>
+      <div class="flow-box">GCS<br><span style="font-size:0.65rem;color:var(--muted)">date={end_date}</span></div>
+      <span class="arrow">→</span>
+      <div class="flow-box">Bronze</div>
+      <span class="arrow">→</span>
+      <div class="flow-box">Silver</div>
+      <span class="arrow">→</span>
+      <div class="flow-box">Gold</div>
+    </div>
+    <div style="display:flex; gap: 20px; margin-top: 12px; flex-wrap: wrap;">
+      <div><span class="tag tag-yellow">Limitation</span> <span style="font-size:0.8rem;">Aggregated CSVs — no event IDs, no user identity, no cross-dimension joins</span></div>
+      <div><span class="tag tag-yellow">Limitation</span> <span style="font-size:0.8rem;">No date column in CSVs — backfills must be day-by-day</span></div>
+      <div><span class="tag tag-yellow">Limitation</span> <span style="font-size:0.8rem;">No unique row identifier — duplicates undetectable</span></div>
+    </div>
+  </div>
+
+  <!-- Proposed pipeline -->
+  <div class="panel full">
+    <div class="panel-title">Proposed Hybrid Pipeline</div>
+    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+      <div style="flex: 1; min-width: 300px;">
+        <h3 style="color:var(--green);">Conversion Events (new)</h3>
+        <div class="flow-h">
+          <div class="flow-box new">/conversion/list</div>
+          <span class="arrow">→</span>
+          <div class="flow-box new">/conversion/data/get</div>
+          <span class="arrow">→</span>
+          <div class="flow-box new">Merge all dims</div>
+          <span class="arrow">→</span>
+          <div class="flow-box new">bronze.piano_conversion_events</div>
+        </div>
+      </div>
+      <div style="flex: 1; min-width: 300px;">
+        <h3 style="color:var(--muted);">Exposures (kept from export)</h3>
+        <div class="flow-h">
+          <div class="flow-box">VX Export</div>
+          <span class="arrow">→</span>
+          <div class="flow-box">9 CSVs</div>
+          <span class="arrow">→</span>
+          <div class="flow-box">bronze.piano_reports_*</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Schema comparison -->
+  <div class="panel">
+    <div class="panel-title">Bronze Schema — piano_reports_devices</div>
+    <div class="col-list">
+      <span class="col-chip">device</span>
+      <span class="col-chip">operating_system</span>
+      <span class="col-chip">browser</span>
+      <span class="col-chip">exposures</span>
+      <span class="col-chip">conversions</span>
+      <span class="col-chip">conversion_rate</span>
+      <span class="col-chip">currency</span>
+      <span class="col-chip meta">region</span>
+      <span class="col-chip meta">site_name</span>
+      <span class="col-chip meta">ingested_at</span>
+      <span class="col-chip meta">batch</span>
+    </div>
+    <div style="margin-top: 12px; font-size: 0.75rem; color: var(--muted);">
+      <span class="tag tag-blue">meta</span> = added at load time &nbsp;|&nbsp;
+      <span class="col-chip missing" style="text-decoration:none;">missing</span> = no date, no event ID, no user
+    </div>
+  </div>
+
+  <!-- What list API returns -->
+  <div class="panel">
+    <div class="panel-title">/conversion/list — Event Record</div>
+    <div class="col-list">
+      <span class="col-chip added">term_conversion_id</span>
+      <span class="col-chip added">create_date</span>
+      <span class="col-chip added">type</span>
+      <span class="col-chip added">uid</span>
+      <span class="col-chip added">email</span>
+      <span class="col-chip">term_id</span>
+      <span class="col-chip">term_name</span>
+      <span class="col-chip added">access_id</span>
+      <span class="col-chip added">subscription_id</span>
+      <span class="col-chip added">payment_amount</span>
+      <span class="col-chip added">payment_currency</span>
+      <span class="col-chip added">promo_code</span>
+      <span class="col-chip">browser_id</span>
+    </div>
+    <div style="margin-top: 12px; font-size: 0.75rem; color: var(--muted);">
+      <span class="tag tag-green">new</span> = not available in export CSVs &nbsp;|&nbsp; 35 columns per record
+    </div>
+  </div>
+
+  <!-- What data/get enrichment returns (VERIFIED) -->
+  <div class="panel full">
+    <div class="panel-title">/conversion/data/get — Enrichment Fields <span class="tag tag-green">verified</span></div>
+    <p style="font-size: 0.75rem; color: var(--muted); margin-bottom: 10px;">24 fields confirmed via production API call (April 3, 2026). One call per term_conversion_id.</p>
+    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+      <div style="flex: 1; min-width: 200px;">
+        <h3 style="font-size: 0.8rem; color: var(--accent); margin-bottom: 6px;">Device</h3>
+        <div class="col-list">
+          <span class="col-chip added">platform</span>
+          <span class="col-chip added">browser</span>
+          <span class="col-chip added">operating_system</span>
+          <span class="col-chip added">user_agent</span>
+        </div>
+      </div>
+      <div style="flex: 1; min-width: 200px;">
+        <h3 style="font-size: 0.8rem; color: var(--accent); margin-bottom: 6px;">Location</h3>
+        <div class="col-list">
+          <span class="col-chip added">user_country</span>
+          <span class="col-chip added">user_region</span>
+          <span class="col-chip added">user_city</span>
+          <span class="col-chip added">zip</span>
+          <span class="col-chip added">latitude</span>
+          <span class="col-chip added">longitude</span>
+        </div>
+      </div>
+      <div style="flex: 1; min-width: 200px;">
+        <h3 style="font-size: 0.8rem; color: var(--accent); margin-bottom: 6px;">Page &amp; Content</h3>
+        <div class="col-list">
+          <span class="col-chip added">url</span>
+          <span class="col-chip added">content_author</span>
+          <span class="col-chip added">content_section</span>
+          <span class="col-chip added">content_created</span>
+          <span class="col-chip added">tags</span>
+        </div>
+      </div>
+      <div style="flex: 1; min-width: 200px;">
+        <h3 style="font-size: 0.8rem; color: var(--accent); margin-bottom: 6px;">Attribution</h3>
+        <div class="col-list">
+          <span class="col-chip added">template_id</span>
+          <span class="col-chip added">offer_id</span>
+          <span class="col-chip added">offer_template_id</span>
+          <span class="col-chip added">campaigns</span>
+          <span class="col-chip added">locale</span>
+          <span class="col-chip added">hour</span>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top: 12px; font-size: 0.75rem; color: var(--muted);">
+      Join key: <code style="color:var(--green)">term_conversion_id</code> + <code style="color:var(--green)">uid</code> &nbsp;|&nbsp;
+      Evidence: <code>conversion-data-get-rich-sample.json</code>
+    </div>
+  </div>
+
+  <!-- Comparison table -->
+  <div class="panel">
+    <div class="panel-title">Options Comparison</div>
+    <table>
+      <tr><th>Capability</th><th>Export</th><th>API</th><th>Hybrid</th></tr>
+      <tr><td>Cross-dimension</td><td style="color:var(--red)">✗</td><td style="color:var(--green)">✓</td><td style="color:var(--green)">✓</td></tr>
+      <tr><td>User identity</td><td style="color:var(--red)">✗</td><td style="color:var(--green)">✓</td><td style="color:var(--green)">✓</td></tr>
+      <tr><td>Revenue/page</td><td style="color:var(--red)">✗</td><td style="color:var(--green)">✓</td><td style="color:var(--green)">✓</td></tr>
+      <tr><td>Dedup</td><td style="color:var(--red)">✗</td><td style="color:var(--green)">✓</td><td style="color:var(--green)">✓</td></tr>
+      <tr><td>Backfill range</td><td style="color:var(--yellow)">day-by-day</td><td style="color:var(--green)">any</td><td style="color:var(--green)">any</td></tr>
+      <tr><td>Exposures</td><td style="color:var(--green)">✓</td><td style="color:var(--red)">✗</td><td style="color:var(--green)">✓</td></tr>
+    </table>
+  </div>
+
+  <!-- Metrics -->
+  <div class="panel">
+    <div class="panel-title">March 15, 2026 — Cosmopolitan</div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+      <div class="metric">
+        <div class="metric-num" style="color:var(--accent)">38</div>
+        <div class="metric-label">Total conversions</div>
+      </div>
+      <div class="metric">
+        <div class="metric-num" style="color:var(--green)">38</div>
+        <div class="metric-label">List API records</div>
+      </div>
+      <div class="metric">
+        <div class="metric-num" style="color:var(--green)">= Match</div>
+        <div class="metric-label">Both sources agree</div>
+      </div>
+    </div>
+    <table style="margin-top: 16px;">
+      <tr><th>Export CSV</th><th>Rows</th><th>Conversions</th></tr>
+      <tr><td>conversion-device</td><td>30</td><td>38</td></tr>
+      <tr><td>conversion-location</td><td>229</td><td>38</td></tr>
+      <tr><td>conversion-page</td><td>500</td><td>38</td></tr>
+      <tr><td>conversion-term</td><td>4</td><td>38</td></tr>
+      <tr><td>conversion-template</td><td>3</td><td>38</td></tr>
+      <tr><td>conversion-tag</td><td>6</td><td>38</td></tr>
+      <tr><td>conversion-termType</td><td>2</td><td>38</td></tr>
+    </table>
+  </div>
+
+
+</div>
+
+</body>
+</html>
