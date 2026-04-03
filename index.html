@@ -56,6 +56,10 @@
   }
   .badge-light { background: var(--accent-light); color: var(--accent); }
   .badge-dark { background: #1e293b; color: #f1f5f9; }
+  .badge-jira { background: #deebff; color: #0052cc; }
+  .jira-card { border-left: 4px solid #0052cc; }
+  .jira-card h2 { color: #0052cc; }
+  .jira-id { font-size: 0.75rem; font-weight: 500; color: #0052cc; opacity: 0.7; margin-bottom: 2px; }
   .footer { margin-top: 40px; text-align: center; font-size: 0.75rem; color: var(--muted); }
 </style>
 </head>
@@ -64,6 +68,12 @@
 
 <h1>Piano Data Quality</h1>
 <p class="sub">Conversion export structure, event-level API alternative, and hybrid solution.</p>
+
+<a class="card jira-card" href="https://mediaos.atlassian.net/browse/INTHE-2065" target="_blank" rel="noopener">
+  <p class="jira-id">INTHE-2065</p>
+  <h2>Jira Ticket <span class="badge badge-jira">Jira</span></h2>
+  <p>The formal ticket with full problem description, evidence attachments, and proposed solution. Requires Jira access.</p>
+</a>
 
 <a class="card" href="JIRA_TICKET_PRESENTATION.html">
   <h2>Presentation <span class="badge badge-light">Non-technical</span></h2>
